@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using TicTacToe.Net;
 
@@ -63,7 +64,8 @@ namespace TestTicTacToe
                     board[i][j] = Played.Empty;
                 }
             }
-            var score = AlgoHeuristic.ComputeScore(board);
+            
+            var score = AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board));
             Assert.AreEqual(score, 0);
         }
         private void Invert(Played[][] board)
@@ -125,9 +127,9 @@ namespace TestTicTacToe
                 empty, empty, empty,
             };
             var score = Constants.WinCorner + Constants.CenterSquareAnyBoard + Constants.SmallBoardWin;
-            Assert.AreEqual(AlgoHeuristic.ComputeScore(board), score);
+            Assert.AreEqual(AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)), score);
             Invert(board);
-            Assert.AreEqual(AlgoHeuristic.ComputeScore(board), score * -1);
+            Assert.AreEqual(AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)), score * -1);
         }
 
         [Test]
@@ -192,12 +194,60 @@ namespace TestTicTacToe
                 }
             };
 
-            Assert.AreEqual(AlgoHeuristic.ComputeScore(board), 24);
-            Invert(board);
-            Assert.AreEqual(AlgoHeuristic.ComputeScore(board), -24);
-            
+            Assert.AreEqual(24, AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)));
+            Invert(board);    
+            Assert.AreEqual(-24,AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)));
         }
-        
+
+        [Test]
+        public void GenerateNextStates()
+        {
+            var empty = new[]
+            {
+                Played.Empty, Played.Empty, Played.Empty,
+                Played.Empty, Played.Empty, Played.Empty,
+                Played.Empty, Played.Empty, Played.Empty,
+            };
+            var board = new[]
+            {
+                empty, empty, empty,
+                empty, empty, empty,
+                empty, empty, empty,
+            };
+            var gameState = new GameState(Player.Self, board, null!, empty);
+            gameState.GenerateChildrenState(2);
+            Assert.AreEqual(gameState.ChildStates.Count, 81);
+            foreach (var gameStateChildState in gameState.ChildStates)
+            {
+                Assert.AreEqual(gameStateChildState.NextPlayer, Player.Opponent);
+            }
+
+            var childState = gameState.ChildStates.First();
+            Assert.AreEqual(childState.ChildStates.Count, 8);
+            Assert.AreEqual(gameState.ChildStates[1].ChildStates.Count, 9);
+        }
+
+        [Test]
+        public void TestPlaying()
+        {
+            var empty = new[]
+            {
+                Played.Empty, Played.Empty, Played.Empty,
+                Played.Empty, Played.Empty, Played.Empty,
+                Played.Empty, Played.Empty, Played.Empty,
+            };
+            var board = new[]
+            {
+                empty, empty, empty,
+                empty, empty, empty,
+                empty, empty, empty,
+            };
+            var gameState = new GameState(Player.Self, board, null!, empty);
+            var state = gameState.NextPlay(1);
+            Console.WriteLine(Monitoring.HeuristicTime);
+            Console.WriteLine(Monitoring.ChildrenGenerationTime);
+            Console.WriteLine(state.LastPlayed);
+        }
         
     }
 }

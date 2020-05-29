@@ -1,18 +1,19 @@
 ﻿#nullable enable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 namespace TicTacToe.Net
 {
-    public enum Played : byte
+    public enum Played : int
     {
         Self = 0,
         Opponent = 1,
         Empty = 2
     }
 
-    public enum Result : byte
+    public enum Result : int
     {
         Self = 0,
         Opponent = 1,
@@ -20,117 +21,388 @@ namespace TicTacToe.Net
         NotFinished = 3
     }
 
-    public enum Player : byte
+    public enum Player : int
     {
         Self = 0,
         Opponent = 1
-    }
-
-    public class ScoreCounter
-    {
-        public int SmallBoardWin { get; set; } = 0;
-        public int WinCenter { get; set; } = 0;
-        public int WinCorner { get; set; } = 0;
-        public int CenterSquareAnyBoard { get; set; } = 0;
-        public int SquareInCenterBoard { get; set; } = 0;
-        public int TwoBoardWin { get; set; } = 0;
-        public int TwoSquareWin { get; set; } = 0;
     }
 
     public static class Constants
     {
         public const int Win = 10000;
         public const int Lose = -10000;
-        public const int SmallBoardWin = 5;
+        public const int SmallBoardWin = 10;
         public const int WinCenter = 10;
         public const int WinCorner = 3;
-        public const int CenterSquareAnyBoard = 3;
-        public const int SquareInCenterBoard = 3;
-        public const int TwoBoardWin = 4;
-        public const int TwoSquareWin = 2;
+        public const int CenterSquareAnyBoard = 1;
+        public const int SquareInCenterBoard = 1;
+        public const int TwoBoardWin = 20;
+        public const int TwoSquareWin = 1;
 
-        public static byte[][] WinPositions = new[]
+        public static readonly int[][] WinPositions = new[]
         {
-            new byte[] {0, 1, 2},
-            new byte[] {3, 4, 5},
-            new byte[] {6, 7, 8},
-            new byte[] {0, 3, 6},
-            new byte[] {1, 4, 7},
-            new byte[] {2, 5, 8},
-            new byte[] {0, 4, 8},
-            new byte[] {2, 4, 6},
+            new[] {0, 1, 2},
+            new[] {3, 4, 5},
+            new[] {6, 7, 8},
+            new[] {0, 3, 6},
+            new[] {1, 4, 7},
+            new[] {2, 5, 8},
+            new[] {0, 4, 8},
+            new[] {2, 4, 6},
         };
     }
 
 
     public class PlayPosition
     {
-        public readonly byte BoardNum;
-        public readonly byte Pos;
+        public readonly int BoardNum;
+        public readonly int Pos;
 
-        public PlayPosition(byte boardNum, byte pos)
+        public PlayPosition(int boardNum, int pos)
         {
             BoardNum = boardNum;
             Pos = pos;
         }
+
+        public override bool Equals(object? obj)
+        {
+            if (!(obj is PlayPosition other)) return false;
+            return (other.BoardNum == BoardNum && other.Pos == Pos);
+        }
+
+        protected bool Equals(PlayPosition other)
+        {
+            return BoardNum == other.BoardNum && Pos == other.Pos;
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(BoardNum, Pos);
+        }
     }
 
-    internal class GameState
+    public class GameState
     {
         private Played[][] _board;
-        private Player _nextPlayer;
-        private PlayPosition? _playPositiion;
+        public readonly Player NextPlayer;
+        public readonly PlayPosition? LastPlayed;
+        private Played[] _boardResult;
+        private Result _result;
+        public int? Score { get; private set; }
 
+        public List<GameState>? ChildStates { get; set; }
 
-        public List<GameState> ChildStates { get; } = new List<GameState>();
-
-        public GameState(Player nextPlayer, Played[][] board, PlayPosition playPositiion)
+        public GameState(Player nextPlayer, Played[][] board, PlayPosition lastPlayed, Played[] boardResult)
         {
-            _nextPlayer = nextPlayer;
+            NextPlayer = nextPlayer;
             _board = board;
-            _playPositiion = playPositiion;
+            LastPlayed = lastPlayed;
+            _boardResult = boardResult;
+            SetResult();
         }
-    }
 
-    public static class AlgoHeuristic
-    {
-        public static int GetHashCodeOne<T>(T[] values, Func<T, int> toInt)
+        public Tuple<int, int> LastPlayedCoordinate()
         {
-            var result = 0;
-            var shift = 0;
-            foreach (var t in values)
+            return Coordinate.ToCoordinate(LastPlayed);
+        }
+        
+        private void SetResult()
+        {
+            if (AlgoHeuristic.IsWinOneBoard(_boardResult, Player.Opponent))
             {
-                shift = (shift + 11) % 21;
-                result ^= ((toInt(t)) + 1024) << shift;
+                _result = Result.Opponent;
+            }
+            else if (AlgoHeuristic.IsWinOneBoard(_boardResult, Player.Self))
+            {
+                _result = Result.Self;
+            }
+            else if (AlgoHeuristic.IsFinished(_boardResult))
+            {
+                _result = Result.Equal;
+            }
+            else
+            {
+                _result = Result.NotFinished;
+            }
+        }
+
+
+        public void GenerateChildrenState(int level)
+        {
+            if (level == 0 || _result != Result.NotFinished)
+            {
+                return;
             }
 
-            return result;
+            ChildStates ??= NextGameStates();
+
+            Monitoring.Children += ChildStates.Count;
+
+            foreach (var childState in ChildStates)
+            {
+                childState.GenerateChildrenState(level - 1);
+            }
         }
 
-        public static int GetHashCode(Played[][] board)
+
+        public Player GetNextPlayer(Player currentPlayer)
         {
-            return GetHashCodeOne(board, p => GetHashCodeOne(p, x => (int) x));
+            return currentPlayer switch
+            {
+                Player.Self => Player.Opponent,
+                Player.Opponent => Player.Self,
+                _ => throw new ArgumentOutOfRangeException(nameof(currentPlayer), currentPlayer, null)
+            };
         }
 
+        private Played[][] CopyBoard()
+        {
+            var stopWatch = new Stopwatch();
+            stopWatch.Start();
+            var board = new Played[9][];
+            for (var i = 0; i < 9; i++)
+            {
+                var smallBoard = new Played[9];
+                for (var j = 0; j < 9; j++)
+                {
+                    smallBoard[j] = _board[i][j];
+                }
 
-        #region Scoring
+                board[i] = smallBoard;
+            }
+            stopWatch.Stop();
+            Monitoring.AllocationTime += stopWatch.Elapsed.TotalSeconds;
 
-        private static bool IsFinished(Played[] board)
+            return board;
+        }
+
+        private bool SingleBoardFinished(Played[] board)
         {
             return board.All(c => c != Played.Empty);
         }
 
-        private static bool IsWinOneBoard(Played[] board, Player player)
+
+        private List<GameState> NextGameStates()
+        {
+            var children = new List<GameState>();
+
+            if (LastPlayed == null || _boardResult[LastPlayed.Pos] == Played.Opponent ||
+                _boardResult[LastPlayed.Pos] == Played.Self || SingleBoardFinished(_board[LastPlayed.Pos]))
+            {
+                for (var i = 0; i < 9; i++)
+                {
+                    if (_boardResult[i] != Played.Empty) continue;
+                    children.AddRange(GenerateOne(i));
+                }
+            }
+            else
+            {
+                children.AddRange(GenerateOne(LastPlayed.Pos));
+            }
+
+            return children;
+        }
+
+        private IEnumerable<GameState> GenerateOne(int i)
+        {
+            List<GameState> children = new List<GameState>();
+            for (int j = 0; j < 9; j++)
+            {
+                if (_board[i][j] != Played.Empty) continue;
+                var nextBoard = CopyBoard();
+                nextBoard[i][j] = NextPlayer switch
+                {
+                    Player.Self => Played.Self,
+                    Player.Opponent => Played.Opponent,
+                    _ => throw new Exception("Next player invalid")
+                };
+
+                var boardResult = GetNextBoardResult(nextBoard, _boardResult, new PlayPosition(i, j));
+                var test = AlgoHeuristic.GetBoardResult(nextBoard);
+                for (var x = 0; x < 9; x++)
+                { 
+                    Debug.Assert(boardResult[x] == test[x]);
+                }
+                var nextGameState = new GameState(GetNextPlayer(NextPlayer), nextBoard,
+                    new PlayPosition(i, j), boardResult);
+                children.Add(nextGameState);
+            }
+
+            return children;
+        }
+
+        private Played[] GetNextBoardResult(Played[][] nextBoard, Played[] lastResult, PlayPosition? nextPlay)
+        {
+            var stopWatch = new Stopwatch();
+            stopWatch.Start();
+            var result = new Played[9];
+            for (var boardPos = 0; boardPos < 9; boardPos++)
+            {
+                if (nextPlay != null && boardPos == nextPlay.Pos)
+                {
+                    var sBoard = nextBoard[boardPos];
+                    if (AlgoHeuristic.IsWinOneBoard(sBoard, Player.Self))
+                    {
+                        result[boardPos] = Played.Self;
+                    }
+                    else if (AlgoHeuristic.IsWinOneBoard(sBoard, Player.Opponent))
+                    {
+                        result[boardPos] = Played.Opponent;
+                    }
+                    else
+                    {
+                        result[boardPos] = Played.Empty;
+                    }
+                }
+                else
+                {
+                    result[boardPos] = lastResult[boardPos];
+                }
+            }
+            stopWatch.Stop();
+            Monitoring.ComputeBoardResultTime +=  stopWatch.Elapsed.TotalSeconds;
+            return result;
+
+        }
+
+        private bool IsTerminated()
+        {
+            return (_result != Result.NotFinished);
+        }
+
+        private int NegaMax(int depth, int alpha, int beta, int color)
+        {
+            if (depth == 0 || IsTerminated())
+            {
+                if (Score != null) return Score.Value;
+                var score = color * AlgoHeuristic.ComputeScore(_board, _boardResult);
+                Score = score;
+                return score;
+            }
+
+            if (ChildStates == null)
+            {
+                var stopWatch = new Stopwatch();
+                stopWatch.Start();
+                GenerateChildrenState(1);
+                stopWatch.Stop();
+                Monitoring.ChildrenGenerationTime += stopWatch.Elapsed.TotalSeconds;
+            }
+
+            var value = int.MinValue;
+
+            foreach (var childState in ChildStates)
+            {
+                value = Math.Max(value, -1 * childState.NegaMax(depth - 1, -beta, -alpha, -color));
+                alpha = Math.Max(alpha, value);
+                if (alpha >= beta) break;
+            }
+
+            Score = value;
+            return value;
+        }
+
+        public GameState NextPlay(int depth)
+        {
+            Monitoring.Init();
+            var score = NegaMax(depth, int.MinValue, int.MaxValue, 1);
+            if (ChildStates == null) throw new Exception("Children cannot be null here");
+            var child = ChildStates.Find(x => x.Score == -score);
+            if (child == null) throw new Exception("Cannot find child node");
+            return child;
+        }
+
+        public GameState Move(PlayPosition played)
+        {
+            if (ChildStates == null)
+            {
+                GenerateChildrenState(1);
+            }
+
+            return ChildStates?.Find(c => Equals(c.LastPlayed, played))
+                   ?? throw new Exception("Cannot find child state");
+        }
+
+        public GameState Move(int row, int col)
+        {
+            var played = Coordinate.FromCoordinate(row, col);
+            return Move(played);
+        }
+        
+    }
+
+    public static class Monitoring
+    {
+        public static double ChildrenGenerationTime { get; set; }
+        public static double HeuristicTime { get; set; }
+        public static double AllocationTime { get; set; }
+        public static int Children { get; set; }
+        public static double ComputeBoardResultTime { get; set; }
+
+        public static void Init()
+        {
+            ChildrenGenerationTime = 0;
+            HeuristicTime = 0;
+            AllocationTime = 0;
+            Children = 0;
+            ComputeBoardResultTime = 0;
+        }
+    }
+
+
+    public static class AlgoHeuristic
+    {
+        private class BoardEquality : EqualityComparer<Played[]>
+        {
+            public override bool Equals(Played[] x, Played[] y)
+            {
+                if (x.Length != y.Length)
+                {
+                    return false;
+                }
+
+                return !x.Where((t, i) => t != y[i]).Any();
+            }
+
+            public override int GetHashCode(Played[] obj)
+            {
+                var result = 0;
+                var shift = 0;
+                foreach (var t in obj)
+                {
+                    shift = (shift + 11) % 21;
+                    result ^= (((int) (t)) + 1024) << shift;
+                }
+
+                return result;
+            }
+        }
+
+        private static Dictionary<Played[], int> _memoResult = new Dictionary<Played[], int>(new BoardEquality());
+        private static Dictionary<Played[], int> _memoBoard = new Dictionary<Played[], int>(new BoardEquality());
+
+
+        #region Scoring
+
+        internal static bool IsFinished(Played[] board)
+        {
+            return board.All(c => c != Played.Empty);
+        }
+
+        public static bool IsWinOneBoard(Played[] board, Player player)
         {
             var played = (Played) player;
-            return Constants.WinPositions.Any(positions =>
+            var result = Constants.WinPositions.Any(positions =>
                 board[positions[0]] == played &&
                 board[positions[1]] == played &&
                 board[positions[2]] == played);
+            return result;
         }
 
-        private static Played[] GetBoardResult(Played[][] board)
+        public static Played[] GetBoardResult(Played[][] board)
         {
+            var stopWatch = new Stopwatch();
+            stopWatch.Start();
             var result = new Played[9];
             for (var boardPos = 0; boardPos < 9; boardPos++)
             {
@@ -148,63 +420,59 @@ namespace TicTacToe.Net
                     result[boardPos] = Played.Empty;
                 }
             }
-
+            stopWatch.Stop();
+            Monitoring.ComputeBoardResultTime +=  stopWatch.Elapsed.TotalSeconds;
             return result;
         }
 
-        private static void WinSmallBoardScore(int pos, ScoreCounter counter)
+        private static int WinSmallBoardScore(int pos)
         {
-            counter.SmallBoardWin += 1;
+            var score = Constants.SmallBoardWin;
             switch (pos)
             {
                 case 4:
-                    counter.WinCenter += 1;
+                    score += Constants.WinCenter;
                     break;
                 case 0:
                 case 2:
                 case 6:
                 case 8:
-                    counter.WinCorner += 1;
+                    score += Constants.WinCorner;
                     break;
             }
+
+            return score;
         }
 
 
-        private static void GetBoardScore(Played[] result, Player player, ScoreCounter counter)
+        private static int GetBoardScore(Played[] result, Player player)
         {
+            var score = 0;
             for (var i = 0; i < 9; i++)
             {
                 var r = result[i];
-                if ((byte) r == (byte) player)
+                if ((int) r == (int) player)
                 {
-                    WinSmallBoardScore(i, counter);
+                    score += WinSmallBoardScore(i);
                 }
             }
 
 
-            counter.TwoBoardWin += TwoWinningCount(result, player);
+            score += TwoWinningCount(result, player) * Constants.TwoBoardWin;
+            return score;
         }
 
-        private static void ComputeOneBoardScore(Played[] board, int boardPos, Player player, ScoreCounter counter)
+        private static int ComputeOneBoardScore(Played[] board, Player player)
         {
             var played = (Played) player;
+            var score = 0;
             if (board[4] == played)
             {
-                counter.CenterSquareAnyBoard += 1;
+                score += Constants.CenterSquareAnyBoard;
             }
 
-            if (boardPos == 4)
-            {
-                foreach (var cell in board)
-                {
-                    if (cell == played)
-                    {
-                        counter.SquareInCenterBoard += 1;
-                    }
-                }
-            }
-
-            counter.TwoSquareWin += TwoWinningCount(board, player);
+            score += TwoWinningCount(board, player) * Constants.TwoSquareWin;
+            return score;
         }
 
         public static int TwoWinningCount(Played[] board, Player player)
@@ -235,50 +503,80 @@ namespace TicTacToe.Net
             return count;
         }
 
-        private static ScoreCounter CountOnePlayer(Played[][] board, Player player, Played[] boardResult)
+        private static int ComputeSquareInCenterBoard(Played[] board, Player player)
         {
-            var counter = new ScoreCounter();
-            GetBoardScore(boardResult, player, counter);
+            var played = (Played) player;
+            return board.Where(cell => cell == played).Sum(cell => Constants.SquareInCenterBoard);
+        }
 
-            for (var i = 0; i < 9; i++)
+        private static int Score(Played[][] board, Played[] boardResult)
+        {
+            if (!_memoResult.TryGetValue(boardResult, out var boardScore))
             {
-                ComputeOneBoardScore(board[i], i, player, counter);
+                boardScore = GetBoardScore(boardResult, Player.Self) - GetBoardScore(boardResult, Player.Opponent);
+                _memoResult[boardResult] = boardScore;
             }
 
-            return counter;
+            var allSmallBoardScore = board.Sum(b =>
+            {
+                if (_memoBoard.TryGetValue(b, out var smallBoardScore)) return smallBoardScore;
+                smallBoardScore = ComputeOneBoardScore(b, Player.Self) - ComputeOneBoardScore(b, Player.Opponent);
+                _memoBoard[b] = smallBoardScore;
+                return smallBoardScore;
+            });
+            var squareInCenterBoardScore = ComputeSquareInCenterBoard(board[4], Player.Self) -
+                                           ComputeSquareInCenterBoard(board[4], Player.Opponent);
+            return boardScore + allSmallBoardScore + squareInCenterBoardScore;
         }
 
-        private static int ComputeScoreOnePlayer(ScoreCounter counter)
-        {
-            return counter.WinCenter * Constants.WinCenter + counter.WinCorner * Constants.WinCorner +
-                   counter.SmallBoardWin * Constants.SmallBoardWin + counter.TwoBoardWin * Constants.TwoBoardWin +
-                   counter.TwoSquareWin * Constants.TwoSquareWin +
-                   counter.CenterSquareAnyBoard * Constants.CenterSquareAnyBoard +
-                   counter.SquareInCenterBoard * Constants.SquareInCenterBoard;
-        }
 
-        public static int ComputeScore(Played[][] board)
+        public static int ComputeScore(Played[][] board, Played[] boardResult)
         {
-            var boardResult = GetBoardResult(board);
+            var stopWatch = new Stopwatch();
+            stopWatch.Start();
             if (IsWinOneBoard(boardResult, Player.Opponent))
             {
-                return -10000;
+                return Constants.Lose;
             }
 
             if (IsWinOneBoard(boardResult, Player.Self))
             {
-                return 10000;
+                return Constants.Win;
             }
+
             if (IsFinished(boardResult))
             {
                 return 0;
             }
-            var selfScore = CountOnePlayer(board, Player.Self, boardResult);
-            var opponentScore = CountOnePlayer(board, Player.Opponent, boardResult);
-            return ComputeScoreOnePlayer(selfScore) - ComputeScoreOnePlayer(opponentScore);
+
+            var score = Score(board, boardResult);
+            stopWatch.Stop();
+            Monitoring.HeuristicTime += stopWatch.Elapsed.TotalSeconds;
+            return score;
         }
 
         #endregion
+    }
+
+    public static class Coordinate
+    {
+        public static PlayPosition FromCoordinate(int row, int col)
+        {
+            var boardi = col / 3;
+            var boardj = row / 3;
+            var boardCoordinate = boardj * 3 + boardi;
+            var cellCoordinate = (row % 3) * 3 + col % 3;
+            return new PlayPosition(boardCoordinate, cellCoordinate);
+        }
+
+        public static Tuple<int, int> ToCoordinate(PlayPosition? played) // row col
+        {
+            var boardX = played.BoardNum % 3;
+            var boardY = played.BoardNum / 3;
+            var i = played.Pos % 3;
+            var j = played.Pos / 3;
+            return new Tuple<int, int>(boardY * 3 + j, boardX * 3 + i);
+        }
     }
 
     static class Program
@@ -287,13 +585,16 @@ namespace TicTacToe.Net
         {
             string[] inputs;
 
+            GameState gameState = null;
+            var firstMove = true;
+
             // game loop
             while (true)
             {
                 inputs = Console.ReadLine()?.Split(' ');
-                int opponentRow = int.Parse(inputs[0]);
-                int opponentCol = int.Parse(inputs[1]);
-                int validActionCount = int.Parse(Console.ReadLine());
+                var opponentRow = int.Parse(inputs[0]);
+                var opponentCol = int.Parse(inputs[1]);
+                var validActionCount = int.Parse(Console.ReadLine());
                 for (int i = 0; i < validActionCount; i++)
                 {
                     inputs = Console.ReadLine()?.Split(' ');
@@ -304,7 +605,55 @@ namespace TicTacToe.Net
                 // Write an action using Console.WriteLine()
                 // To debug: Console.Error.WriteLine("Debug messages...");
 
-                Console.WriteLine("0 0");
+                if (firstMove)
+                {
+                    var empty = new[]
+                    {
+                        Played.Empty, Played.Empty, Played.Empty,
+                        Played.Empty, Played.Empty, Played.Empty,
+                        Played.Empty, Played.Empty, Played.Empty,
+                    };
+                    var board = new[]
+                    {
+                        empty, empty, empty,
+                        empty, empty, empty,
+                        empty, empty, empty,
+                    };
+
+
+                    if (opponentRow == -1 && opponentCol == -1)
+                    {
+                        gameState = new GameState(Player.Self, board, null!, empty);
+                    }
+                    else
+                    {
+                        gameState = new GameState(Player.Opponent, board, null!, empty);
+                        gameState = gameState.Move(Coordinate.FromCoordinate(opponentRow, opponentCol));
+                        
+                    }
+
+                    firstMove = false;
+                }
+                else
+                {
+                    gameState = gameState.Move(Coordinate.FromCoordinate(opponentRow, opponentCol));
+                }
+                
+                var stopWatch = new Stopwatch();
+                stopWatch.Start();
+                gameState = gameState.NextPlay(3);
+                if (gameState.LastPlayed == null) throw new Exception("Last Played cannot be null");
+                var played = gameState.LastPlayedCoordinate();
+                stopWatch.Stop();
+                
+                Console.Error.WriteLine($"Heuristic Time {Monitoring.HeuristicTime}");
+                Console.Error.WriteLine($"Generation time {Monitoring.ChildrenGenerationTime}");
+                Console.Error.WriteLine($"Allocation time {Monitoring.AllocationTime}");
+                Console.Error.WriteLine($"Children {Monitoring.Children}");
+                Console.Error.WriteLine($"ComputeBoardResultTime {Monitoring.ComputeBoardResultTime}");
+                Console.Error.WriteLine($"Total time {stopWatch.Elapsed.TotalSeconds}");
+                Console.Error.WriteLine($"Score {gameState.Score}");
+                Console.WriteLine($"{played.Item1} {played.Item2}");
             }
         }
     }
