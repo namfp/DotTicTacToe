@@ -194,9 +194,9 @@ namespace TestTicTacToe
                 }
             };
 
-            Assert.AreEqual(24, AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)));
+            Assert.AreEqual(44, AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)));
             Invert(board);    
-            Assert.AreEqual(-24,AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)));
+            Assert.AreEqual(-44,AlgoHeuristic.ComputeScore(board, AlgoHeuristic.GetBoardResult(board)));
         }
 
         [Test]
@@ -214,7 +214,7 @@ namespace TestTicTacToe
                 empty, empty, empty,
                 empty, empty, empty,
             };
-            var gameState = new GameState(Player.Self, board, null!, empty);
+            var gameState = new GameState(null, Player.Self, board, null!, empty);
             gameState.GenerateChildrenState(2);
             Assert.AreEqual(gameState.ChildStates.Count, 81);
             foreach (var gameStateChildState in gameState.ChildStates)
@@ -242,12 +242,41 @@ namespace TestTicTacToe
                 empty, empty, empty,
                 empty, empty, empty,
             };
-            var gameState = new GameState(Player.Self, board, null!, empty);
-            var state = gameState.NextPlay(1);
-            Console.WriteLine(Monitoring.HeuristicTime);
-            Console.WriteLine(Monitoring.ChildrenGenerationTime);
-            Console.WriteLine(state.LastPlayed);
+            var gameState = new GameState(null, Player.Self, board, null!, empty);
+            var state = NegaMaxAlgo.NextPlay(gameState, 1);
         }
+        
+        [Test]
+        public void TestMCTS()
+        {
+            var empty = new[]
+            {
+                Played.Empty, Played.Empty, Played.Empty,
+                Played.Empty, Played.Empty, Played.Empty,
+                Played.Empty, Played.Empty, Played.Empty,
+            };
+            var board = new[]
+            {
+                empty, empty, empty,
+                empty, empty, empty,
+                empty, empty, empty,
+            };
+            var gameState = new GameState(null, Player.Self, board, null!, empty);
+            MCTS.BestMove(gameState, 1000);
+            Console.WriteLine("Finished");
+            Console.WriteLine($"Heuristic Time {Monitoring.HeuristicTime}");
+            Console.WriteLine($"Generation time {Monitoring.ChildrenGenerationTime}");
+            Console.WriteLine($"Allocation time {Monitoring.AllocationTime}");
+            Console.WriteLine($"Children {Monitoring.Children}");
+            Console.WriteLine($"ComputeBoardResultTime {Monitoring.ComputeBoardResultTime}");
+            Console.WriteLine($"RollOutTime {Monitoring.RollOutTime}");
+            Console.WriteLine($"SetResult Time {Monitoring.SetResultTime}");
+        }
+        
+        
+        
+        
+        
         
     }
 }
